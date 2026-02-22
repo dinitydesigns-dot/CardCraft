@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+/* Custom breakpoint: xs = 380px */
+@custom-variant xs (&:where([data-xs] *, .xs\:*));
+@media (min-width: 380px) {
+  .xs\:inline { display: inline !important; }
+  .xs\:flex   { display: flex   !important; }
+  .xs\:hidden { display: none   !important; }
+}
+
+/* ── Base resets ─────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100dvh;          /* dvh = dynamic viewport height for mobile browsers */
+  overscroll-behavior: none;   /* prevent bounce on mobile */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar (desktop) ─────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* ── Focus styles ────────────────────────────────────────────────────────────── */
+input:focus,
+textarea:focus,
+select:focus,
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25);
+}
+
+/* ── Card preview (no text selection for clean download) ─────────────────────── */
+.card-preview * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ── Prevent content from being too wide on small screens ────────────────────── */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ── Mobile: make inputs/buttons large enough to tap comfortably ─────────────── */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select,
+  button {
+    font-size: 16px !important;   /* prevents iOS auto-zoom on focus */
+  }
+
+  /* Ensure the card preview scales down properly */
+  .card-preview-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Hide desktop-only scrollbar on mobile */
+  ::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* ── Safe area insets (iPhone notch / home indicator) ────────────────────────── */
+.safe-top    { padding-top:    env(safe-area-inset-top);    }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.safe-left   { padding-left:   env(safe-area-inset-left);   }
+.safe-right  { padding-right:  env(safe-area-inset-right);  }
+
+/* ── Utility: full viewport height respecting mobile chrome ─────────────────── */
+.min-h-dvh { min-height: 100dvh; }
+.h-dvh     { height: 100dvh; }
