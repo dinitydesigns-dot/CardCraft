@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { User, ProductData, LogoPosition, LogoSize, CardSize, CardFont, BgPattern, BadgeLabel, CARD_SIZES, FONTS, BG_PATTERNS, BADGE_OPTIONS } from '../types';
 import { updateProductData, logActivity, } from '../store';
 import { TemplateRenderer } from './templates/TemplateRenderer';
-import { toPng } from 'html-to-image';
+import { toBlob, toCanvas } from 'html-to-image';
 import jsPDF from 'jspdf';
 import {
   LogOut, Download, Image as ImageIcon, Type, DollarSign, FileText, Phone,
@@ -33,6 +33,31 @@ const LOGO_SIZES: { id: LogoSize; label: string; desc: string }[] = [
 ];
 
 const GOOGLE_FONTS_URL = 'https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Montserrat:wght@400;600;700;900&family=Poppins:wght@400;600;700;900&family=Raleway:wght@400;600;700;900&family=Oswald:wght@400;600;700&display=swap';
+
+function safeFileName(name: string, ext: 'png' | 'pdf') {
+  const base = (name || 'card')
+    .trim()
+    .replace(/[^a-z0-9]+/gi, '_')
+    .replace(/^_+|_+$/g, '');
+  return `${base}_card.${ext}`;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  // don't revoke immediately (Android can fail if revoked too fast)
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+function getExportPixelRatio() {
+  return /Android/i.test(navigator.userAgent) ? 1 : 2;
+}
 
 type Tab = 'product' | 'logo' | 'design' | 'export' | 'account';
 type Theme = 'light' | 'dark' | 'system';
@@ -133,39 +158,81 @@ export function EditorPage({ user, onLogout }: Props) {
     setTimeout(() => setSaved(false), 2000);
   }, [user.id, productData]);
 
-  const getCardNode = async (): Promise<string | null> => {
+  const getCardBlob = async (): Promise<Blob | null> => {
     if (!cardRef.current) return null;
     try {
-      return await toPng(cardRef.current, { quality: 1, pixelRatio: 2, cacheBust: true, skipFonts: false });
-    } catch { return null; }
+      // @ts-ignore
+      await document.fonts?.ready;
+
+      return await toBlob(cardRef.current, {
+        pixelRatio: getExportPixelRatio(),
+        cacheBust: true,
+        quality: 0.98,
+      });
+    } catch (e) {
+      console.error('toBlob failed:', e);
+      return null;
+    }
   };
 
+  const getCardCanvas = async (): Promise<HTMLCanvasElement | null> => {
+    if (!cardRef.current) return null;
+    try {
+      // @ts-ignore
+      await document.fonts?.ready;
+
+      return await toCanvas(cardRef.current, {
+        pixelRatio: getExportPixelRatio(),
+        cacheBust: true,
+      });
+    } catch (e) {
+      console.error('toCanvas failed:', e);
+      return null;
+    }
+  };
   const handleDownloadPNG = useCallback(async () => {
     setDownloading(true);
     logActivity(user.id, 'download', `PNG — ${productData.productName}`);
     try {
-      const dataUrl = await getCardNode();
-      if (!dataUrl) throw new Error('Failed');
-      const link = document.createElement('a');
-      link.download = `${productData.productName.replace(/\s+/g, '_')}_card.png`;
-      link.href = dataUrl; link.click();
-    } catch { alert('Download failed. Please try again.'); }
-    finally { setDownloading(false); }
+      const blob = await getCardBlob();
+      if (!blob) throw new Error('Export failed');
+
+      downloadBlob(blob, safeFileName(productData.productName, 'png'));
+    } catch (e) {
+      console.error(e);
+      alert('Download failed. Please try again.');
+    } finally {
+      setDownloading(false);
+    }
   }, [user.id, productData.productName]);
 
   const handleDownloadPDF = useCallback(async () => {
     setDownloading(true);
     logActivity(user.id, 'download', `PDF — ${productData.productName}`);
     try {
-      const dataUrl = await getCardNode();
-      if (!dataUrl) throw new Error('Failed');
+      const canvas = await getCardCanvas();
+      if (!canvas) throw new Error('Export failed');
+
       const { width, height } = CARD_SIZES[productData.cardSize ?? 'square'];
-      const pdf = new jsPDF({ orientation: width > height ? 'landscape' : 'portrait', unit: 'px', format: [width * 2, height * 2] });
-      pdf.addImage(dataUrl, 'PNG', 0, 0, width * 2, height * 2);
-      pdf.save(`${productData.productName.replace(/\s+/g, '_')}_card.pdf`);
-    } catch { alert('PDF export failed. Please try again.'); }
-    finally { setDownloading(false); }
-  }, [user.id, productData]);
+      const r = getExportPixelRatio();
+
+      const pdf = new jsPDF({
+        orientation: width > height ? 'landscape' : 'portrait',
+        unit: 'px',
+        format: [width * r, height * r],
+      });
+
+      pdf.addImage(canvas, 'PNG', 0, 0, width * r, height * r);
+
+      const pdfBlob = pdf.output('blob');
+      downloadBlob(pdfBlob, safeFileName(productData.productName, 'pdf'));
+    } catch (e) {
+      console.error(e);
+      alert('PDF export failed. Please try again.');
+    } finally {
+      setDownloading(false);
+    }
+  }, [user.id, productData.productName, productData.cardSize]);
 
   const handleGenerateShareLink = useCallback(() => {
     const state = btoa(JSON.stringify({ t: user.assignedTemplate, d: { n: productData.productName, p: productData.price, d: productData.description, c: productData.contactNumber } }));
@@ -820,4 +887,3 @@ export function EditorPage({ user, onLogout }: Props) {
     </div>
   );
 }
-
