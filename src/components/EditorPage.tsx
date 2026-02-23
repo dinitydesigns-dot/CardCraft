@@ -13,6 +13,32 @@ import {
 
 import { changeAdminPassword } from '../store';
 
+function openPreparingTab(label: string): Window | null {
+  const w = window.open('', '_blank');
+  if (!w) return null;
+
+  w.document.open();
+  w.document.write(`
+    <html>
+      <head><title>Preparing download…</title></head>
+      <body style="font-family: system-ui; padding: 16px;">
+        <h3 style="margin:0 0 8px;">Preparing ${label}…</h3>
+        <p style="margin:0; opacity:.7;">Please wait.</p>
+      </body>
+    </html>
+  `);
+  w.document.close();
+
+  return w;
+}
+
+function navigateTabToBlob(w: Window, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  w.location.href = url;
+  // keep longer so user has time to tap download/save
+  setTimeout(() => URL.revokeObjectURL(url), 120_000);
+}
+
 interface Props {
   user: User;
   onLogout: () => void;
@@ -191,15 +217,25 @@ export function EditorPage({ user, onLogout }: Props) {
     }
   };
   const handleDownloadPNG = useCallback(async () => {
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const tab = isAndroid ? openPreparingTab('PNG') : null; // must be BEFORE any await
+
     setDownloading(true);
     logActivity(user.id, 'download', `PNG — ${productData.productName}`);
+
     try {
       const blob = await getCardBlob();
       if (!blob) throw new Error('Export failed');
 
+      if (tab) {
+        navigateTabToBlob(tab, blob);
+        return;
+      }
+
       downloadBlob(blob, safeFileName(productData.productName, 'png'));
     } catch (e) {
       console.error(e);
+      tab?.close();
       alert('Download failed. Please try again.');
     } finally {
       setDownloading(false);
@@ -207,8 +243,12 @@ export function EditorPage({ user, onLogout }: Props) {
   }, [user.id, productData.productName]);
 
   const handleDownloadPDF = useCallback(async () => {
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const tab = isAndroid ? openPreparingTab('PDF') : null; // must be BEFORE any await
+
     setDownloading(true);
     logActivity(user.id, 'download', `PDF — ${productData.productName}`);
+
     try {
       const canvas = await getCardCanvas();
       if (!canvas) throw new Error('Export failed');
@@ -225,9 +265,16 @@ export function EditorPage({ user, onLogout }: Props) {
       pdf.addImage(canvas, 'PNG', 0, 0, width * r, height * r);
 
       const pdfBlob = pdf.output('blob');
+
+      if (tab) {
+        navigateTabToBlob(tab, pdfBlob);
+        return;
+      }
+
       downloadBlob(pdfBlob, safeFileName(productData.productName, 'pdf'));
     } catch (e) {
       console.error(e);
+      tab?.close();
       alert('PDF export failed. Please try again.');
     } finally {
       setDownloading(false);
