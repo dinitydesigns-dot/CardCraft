@@ -100,6 +100,8 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void 
   );
 }
 
+const [androidDownload, setAndroidDownload] = useState<{ url: string; filename: string } | null>(null);
+
 export function EditorPage({ user, onLogout }: Props) {
   const [productData, setProductData] = useState<ProductData>(user.productData);
   const [saved, setSaved] = useState(false);
@@ -117,6 +119,7 @@ export function EditorPage({ user, onLogout }: Props) {
   const [showPreview, setShowPreview] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
+
   useEffect(() => {
     const link = document.createElement('link');
     link.rel = 'stylesheet'; link.href = GOOGLE_FONTS_URL;
@@ -130,6 +133,12 @@ export function EditorPage({ user, onLogout }: Props) {
     const isDark = theme === 'dark' || (theme === 'system' && prefersDark);
     root.classList.toggle('dark', isDark);
   }, [theme]);
+
+  useEffect(() => {
+    return () => {
+      if (androidDownload) URL.revokeObjectURL(androidDownload.url);
+    };
+  }, [androidDownload]);
 
   const updateField = useCallback(<K extends keyof ProductData>(field: K, value: ProductData[K]) => {
     setProductData(prev => {
@@ -232,7 +241,18 @@ export function EditorPage({ user, onLogout }: Props) {
         return;
       }
 
-      downloadBlob(blob, safeFileName(productData.productName, 'png'));
+      const filename = safeFileName(productData.productName, 'png');
+
+      if (/Android/i.test(navigator.userAgent)) {
+        const url = URL.createObjectURL(blob);
+        setAndroidDownload(prev => {
+          if (prev) URL.revokeObjectURL(prev.url);
+          return { url, filename };
+        });
+        return; // stop here (don’t force download)
+      }
+
+      downloadBlob(blob, filename);
     } catch (e) {
       console.error(e);
       tab?.close();
@@ -271,7 +291,18 @@ export function EditorPage({ user, onLogout }: Props) {
         return;
       }
 
-      downloadBlob(pdfBlob, safeFileName(productData.productName, 'pdf'));
+      const filename = safeFileName(productData.productName, 'pdf');
+
+      if (/Android/i.test(navigator.userAgent)) {
+        const url = URL.createObjectURL(pdfBlob);
+        setAndroidDownload(prev => {
+          if (prev) URL.revokeObjectURL(prev.url);
+          return { url, filename };
+        });
+        return;
+      }
+
+      downloadBlob(pdfBlob, filename);
     } catch (e) {
       console.error(e);
       tab?.close();
@@ -711,6 +742,18 @@ export function EditorPage({ user, onLogout }: Props) {
                         })}
                       </div>
                     </div>
+
+                    {androidDownload && (
+                      <a
+                        href={androidDownload.url}
+                        download={androidDownload.filename}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full block text-center px-4 py-3 rounded-xl bg-green-600 text-white font-semibold"
+                      >
+                        Tap to download: {androidDownload.filename}
+                      </a>
+                    )}
 
                     {/* Download */}
                     <div>
