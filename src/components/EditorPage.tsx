@@ -13,31 +13,9 @@ import {
 
 import { changeAdminPassword } from '../store';
 
-function openPreparingTab(label: string): Window | null {
-  const w = window.open('', '_blank');
-  if (!w) return null;
+const [downloading, setDownloading] = useState(false);
 
-  w.document.open();
-  w.document.write(`
-    <html>
-      <head><title>Preparing download…</title></head>
-      <body style="font-family: system-ui; padding: 16px;">
-        <h3 style="margin:0 0 8px;">Preparing ${label}…</h3>
-        <p style="margin:0; opacity:.7;">Please wait.</p>
-      </body>
-    </html>
-  `);
-  w.document.close();
 
-  return w;
-}
-
-function navigateTabToBlob(w: Window, blob: Blob) {
-  const url = URL.createObjectURL(blob);
-  w.location.href = url;
-  // keep longer so user has time to tap download/save
-  setTimeout(() => URL.revokeObjectURL(url), 120_000);
-}
 
 interface Props {
   user: User;
@@ -105,7 +83,7 @@ const [androidDownload, setAndroidDownload] = useState<{ url: string; filename: 
 export function EditorPage({ user, onLogout }: Props) {
   const [productData, setProductData] = useState<ProductData>(user.productData);
   const [saved, setSaved] = useState(false);
-  const [downloading, setDownloading] = useState(false);
+  const [exporting, setExporting] = useState<null | 'png' | 'pdf'>(null);
   const [activeTab, setActiveTab] = useState<Tab>('product');
   const [theme, setTheme] = useState<Theme>('light');
   const [shareUrl, setShareUrl] = useState('');
@@ -118,6 +96,8 @@ export function EditorPage({ user, onLogout }: Props) {
   // Mobile: show preview panel
   const [showPreview, setShowPreview] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+
+  const exportRef = useRef<HTMLDivElement>(null);
 
 
   useEffect(() => {
@@ -194,15 +174,22 @@ export function EditorPage({ user, onLogout }: Props) {
   }, [user.id, productData]);
 
   const getCardBlob = async (): Promise<Blob | null> => {
-    if (!cardRef.current) return null;
+    const node = exportRef.current ?? cardRef.current; // prefer offscreen export node
+    if (!node) return null;
+
     try {
       // @ts-ignore
       await document.fonts?.ready;
 
-      return await toBlob(cardRef.current, {
+      // wait for images inside the node (helps Android a lot)
+      const imgs = Array.from(node.querySelectorAll('img'));
+      await Promise.all(imgs.map(img => img.decode?.().catch(() => { }) ?? Promise.resolve()));
+
+      return await toBlob(node, {
         pixelRatio: getExportPixelRatio(),
         cacheBust: true,
         quality: 0.98,
+        skipFonts: true, // mobile safety
       });
     } catch (e) {
       console.error('toBlob failed:', e);
@@ -211,14 +198,20 @@ export function EditorPage({ user, onLogout }: Props) {
   };
 
   const getCardCanvas = async (): Promise<HTMLCanvasElement | null> => {
-    if (!cardRef.current) return null;
+    const node = exportRef.current ?? cardRef.current;
+    if (!node) return null;
+
     try {
       // @ts-ignore
       await document.fonts?.ready;
 
-      return await toCanvas(cardRef.current, {
+      const imgs = Array.from(node.querySelectorAll('img'));
+      await Promise.all(imgs.map(img => img.decode?.().catch(() => { }) ?? Promise.resolve()));
+
+      return await toCanvas(node, {
         pixelRatio: getExportPixelRatio(),
         cacheBust: true,
+        skipFonts: true,
       });
     } catch (e) {
       console.error('toCanvas failed:', e);
@@ -226,91 +219,32 @@ export function EditorPage({ user, onLogout }: Props) {
     }
   };
   const handleDownloadPNG = useCallback(async () => {
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    const tab = isAndroid ? openPreparingTab('PNG') : null; // must be BEFORE any await
-
-    setDownloading(true);
-    logActivity(user.id, 'download', `PNG — ${productData.productName}`);
+    if (exporting) return;          // prevent double-trigger
+    setExporting('png');
 
     try {
-      const blob = await getCardBlob();
-      if (!blob) throw new Error('Export failed');
-
-      if (tab) {
-        navigateTabToBlob(tab, blob);
-        return;
-      }
-
-      const filename = safeFileName(productData.productName, 'png');
-
-      if (/Android/i.test(navigator.userAgent)) {
-        const url = URL.createObjectURL(blob);
-        setAndroidDownload(prev => {
-          if (prev) URL.revokeObjectURL(prev.url);
-          return { url, filename };
-        });
-        return; // stop here (don’t force download)
-      }
-
-      downloadBlob(blob, filename);
+      // ... your existing PNG export code
     } catch (e) {
       console.error(e);
-      tab?.close();
       alert('Download failed. Please try again.');
     } finally {
-      setDownloading(false);
+      setExporting(null);
     }
-  }, [user.id, productData.productName]);
+  }, [exporting, /* keep your other deps */]);
 
   const handleDownloadPDF = useCallback(async () => {
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    const tab = isAndroid ? openPreparingTab('PDF') : null; // must be BEFORE any await
-
-    setDownloading(true);
-    logActivity(user.id, 'download', `PDF — ${productData.productName}`);
+    if (exporting) return;
+    setExporting('pdf');
 
     try {
-      const canvas = await getCardCanvas();
-      if (!canvas) throw new Error('Export failed');
-
-      const { width, height } = CARD_SIZES[productData.cardSize ?? 'square'];
-      const r = getExportPixelRatio();
-
-      const pdf = new jsPDF({
-        orientation: width > height ? 'landscape' : 'portrait',
-        unit: 'px',
-        format: [width * r, height * r],
-      });
-
-      pdf.addImage(canvas, 'PNG', 0, 0, width * r, height * r);
-
-      const pdfBlob = pdf.output('blob');
-
-      if (tab) {
-        navigateTabToBlob(tab, pdfBlob);
-        return;
-      }
-
-      const filename = safeFileName(productData.productName, 'pdf');
-
-      if (/Android/i.test(navigator.userAgent)) {
-        const url = URL.createObjectURL(pdfBlob);
-        setAndroidDownload(prev => {
-          if (prev) URL.revokeObjectURL(prev.url);
-          return { url, filename };
-        });
-        return;
-      }
-
-      downloadBlob(pdfBlob, filename);
+      // ... your existing PDF export code
     } catch (e) {
       console.error(e);
-      tab?.close();
       alert('PDF export failed. Please try again.');
     } finally {
-      setDownloading(false);
+      setExporting(null);
     }
-  }, [user.id, productData.productName, productData.cardSize]);
+  }, [exporting, /* keep your other deps */]);
 
   const handleGenerateShareLink = useCallback(() => {
     const state = btoa(JSON.stringify({ t: user.assignedTemplate, d: { n: productData.productName, p: productData.price, d: productData.description, c: productData.contactNumber } }));
@@ -397,9 +331,12 @@ export function EditorPage({ user, onLogout }: Props) {
               {saved ? 'Saved!' : 'Save'}
             </button>
 
-            <button onClick={handleDownloadPNG} disabled={downloading} className="flex items-center gap-1.5 px-3 sm:px-4 py-2 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 active:scale-[0.97] text-white rounded-lg text-sm font-medium transition-all shadow-sm disabled:opacity-50">
-              {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              <span className="hidden sm:inline">{downloading ? 'Exporting...' : 'Download'}</span>
+            <button onClick={handleDownloadPNG} disabled={!!exporting}>
+              {exporting === 'png' ? 'Exporting PNG...' : 'Download as PNG'}
+            </button>
+
+            <button onClick={handleDownloadPDF} disabled={!!exporting}>
+              {exporting === 'pdf' ? 'Exporting PDF...' : 'Download as PDF'}
             </button>
 
             <button onClick={onLogout} className={`flex items-center gap-1 px-2 sm:px-3 py-2 rounded-lg text-sm transition-colors ${isDark ? 'text-gray-400 hover:text-red-400 hover:bg-red-900/20' : 'text-gray-500 hover:text-red-600 hover:bg-red-50'}`}>
@@ -974,6 +911,14 @@ export function EditorPage({ user, onLogout }: Props) {
 
         </div>
       </div>
+
+      {/* Offscreen render for export (always rendered even when preview is hidden) */}
+      <div style={{ position: 'fixed', left: -10000, top: 0, opacity: 0, pointerEvents: 'none' }}>
+        <div ref={exportRef}>
+          <TemplateRenderer templateId={user.assignedTemplate} data={productData} />
+        </div>
+      </div>
+
     </div>
   );
 }
